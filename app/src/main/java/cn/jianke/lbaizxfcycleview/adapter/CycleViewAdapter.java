@@ -43,6 +43,9 @@ public class CycleViewAdapter extends PagerAdapter{
                     int vPosition = position;
                     if (vPosition > size)
                         vPosition = vPosition % size;
+                    vPosition --;
+                    if (vPosition < 0)
+                        vPosition = 0;
                     cycleViewListener.onItemClick(vPosition);
                 }
             });

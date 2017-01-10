@@ -2,6 +2,7 @@ package cn.jianke.lbaizxfcycleview.widget;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.os.Handler;
 import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
 import android.view.Gravity;
@@ -15,18 +16,13 @@ import android.widget.RelativeLayout;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import cn.jianke.lbaizxfcycleview.R;
 import cn.jianke.lbaizxfcycleview.adapter.CycleViewAdapter;
 import cn.jianke.lbaizxfcycleview.model.CycleModel;
 import cn.jianke.lbaizxfcycleview.utils.ImageLoader;
-import rx.Observable;
-import rx.Subscription;
-import rx.android.schedulers.AndroidSchedulers;
-import rx.functions.Action1;
-import rx.schedulers.Schedulers;
 
 public class CycleView extends FrameLayout implements ViewPager.OnPageChangeListener{
+
     private int delay = 6000;
     private ViewPager mViewPager;
     private TextView mTitle;
@@ -43,7 +39,19 @@ public class CycleView extends FrameLayout implements ViewPager.OnPageChangeList
     private List<CycleModel> mData;
     private CycleViewAdapter mAdapter;
     private Drawable defaultImage = getResources().getDrawable(R.drawable.default_holder);
-    private Subscription mSubscription;
+    private Handler mHandler = new Handler();
+    private Runnable cycleRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isWheel && isHasWheel) {
+                mCurrentPosition++;
+                if (mViewPager != null)
+                    mViewPager.setCurrentItem(mCurrentPosition, false);
+            }
+            if (mHandler != null)
+                mHandler.postDelayed(cycleRunnable, delay);
+        }
+    };
 
     public CycleView(Context context) {
         this(context, null);
@@ -89,16 +97,19 @@ public class CycleView extends FrameLayout implements ViewPager.OnPageChangeList
         mIndicatorLy.requestLayout();
     }
 
-    public void setData(List<CycleModel> mData , CycleViewListener listener){
-        setData(mData, 0, defaultImage, listener);
+    public void setData(List<CycleModel> mData , Context context, CycleViewListener listener){
+        setData(mData, 0, context, defaultImage, listener);
     }
 
-    public void setData(List<CycleModel> mData , Drawable defaultImage, CycleViewListener listener){
-        setData(mData, 0, defaultImage, listener);
+    public void setData(List<CycleModel> mData ,
+                        Drawable defaultImage,Context context, CycleViewListener listener){
+        setData(mData, 0, context, defaultImage, listener);
     }
 
-    public void setData(List<CycleModel> mData, int defaultPosition,
+    public void setData(List<CycleModel> mData, int defaultPosition, Context context,
                         Drawable defaultImage, CycleViewListener listener){
+        if (context == null)
+            return;
         this.mData = mData;
         if (mData == null || mData.size() == 0){
             this.setVisibility(View.GONE);
@@ -111,21 +122,20 @@ public class CycleView extends FrameLayout implements ViewPager.OnPageChangeList
             isCycle = false;
         mViews.clear();
         if (isCycle) {
-            mViews.add(getCycleView(getContext(), mData.get(size - 1).getUrl(), defaultImage));
+            mViews.add(getCycleView(context, mData.get(size - 1).getUrl(), defaultImage));
             for (int i = 0; i < size; i++) {
-                mViews.add(getCycleView(getContext(), mData.get(i).getUrl(), defaultImage));
+                mViews.add(getCycleView(context, mData.get(i).getUrl(), defaultImage));
             }
-            mViews.add(getCycleView(getContext() , mData.get(0).getUrl(), defaultImage));
+            mViews.add(getCycleView(context , mData.get(0).getUrl(), defaultImage));
         } else {
             for (int i = 0; i < size; i++) {
-                mViews.add(getCycleView(getContext(), mData.get(i).getUrl(), defaultImage));
+                mViews.add(getCycleView(context, mData.get(i).getUrl(), defaultImage));
             }
         }
         cycleViewListener = listener;
         initIndicators(size, getContext());
         setIndicator(defaultPosition);
         setAdapter(mViews, cycleViewListener, size);
-        cancelSubscription();
         startWheel(size);
     }
 
@@ -185,12 +195,9 @@ public class CycleView extends FrameLayout implements ViewPager.OnPageChangeList
                 RelativeLayout.LayoutParams.MATCH_PARENT,
                 RelativeLayout.LayoutParams.MATCH_PARENT);
         imageView.setLayoutParams(layoutParams);
-        ImageLoader.load(context,imageView, url, defaultImage);
-        ImageView backGround = new ImageView(context);
-        backGround.setLayoutParams(layoutParams);
-        backGround.setBackgroundResource(R.color.cycle_image_bg);
+        imageView.setScaleType(ImageView.ScaleType.FIT_XY);
+        ImageLoader.load(context,imageView, url, defaultImage, defaultImage, false);
         mRelativeLayout.addView(imageView);
-        mRelativeLayout.addView(backGround);
         return mRelativeLayout;
     }
 
@@ -251,24 +258,17 @@ public class CycleView extends FrameLayout implements ViewPager.OnPageChangeList
             return;
         }
         setWheel(true);
-        mSubscription = Observable.interval(delay, TimeUnit.MILLISECONDS)
-                .subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread())
-                .subscribe(new Action1<Long>() {
-                    @Override
-                    public void call(Long aLong) {
-                        if (isWheel && isHasWheel) {
-                            mCurrentPosition++;
-                            if (mViewPager != null)
-                                mViewPager.setCurrentItem(mCurrentPosition, false);
-                        }
-                    }
-                });
+        if (mHandler == null)
+            mHandler = new Handler();
+        if (cycleRunnable != null){
+            mHandler.post(cycleRunnable);
+        }
     }
 
-    public void cancelSubscription(){
-        if (mSubscription != null){
-            mSubscription.unsubscribe();
-            mSubscription = null;
+    public void cancelWheel(){
+        if (mHandler != null) {
+            mHandler.removeCallbacks(cycleRunnable);
+            mHandler = null;
         }
     }
 
@@ -286,9 +286,15 @@ public class CycleView extends FrameLayout implements ViewPager.OnPageChangeList
             case MotionEvent.ACTION_MOVE:
             case MotionEvent.ACTION_DOWN:
                 setWheel(false);
+                cancelWheel();
                 break;
             case MotionEvent.ACTION_UP:
                 setWheel(true);
+                if (mHandler == null)
+                    mHandler = new Handler();
+                if (cycleRunnable != null){
+                    mHandler.postDelayed(cycleRunnable, delay);
+                }
                 break;
         }
         return super.dispatchTouchEvent(ev);
